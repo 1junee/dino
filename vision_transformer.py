@@ -21,7 +21,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from utils import trunc_normal_
+from .utils import trunc_normal_
 
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
@@ -212,6 +212,13 @@ class VisionTransformer(nn.Module):
             x = blk(x)
         x = self.norm(x)
         return x[:, 0]
+
+    def get_last_block(self, x):
+        x = self.prepare_tokens(x)
+        for blk in self.blocks:
+            x = blk(x)
+        x = self.norm(x)
+        return x[0]
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)
