@@ -31,7 +31,7 @@ from torchvision import transforms as pth_transforms
 import numpy as np
 from PIL import Image
 
-from . import utils
+import utils
 from . import vision_transformer as vits
 
 
