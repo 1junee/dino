@@ -20,8 +20,24 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-
+import logging
+import os
+import warnings
 from utils import trunc_normal_
+
+XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
+try:
+    if XFORMERS_ENABLED:
+        from xformers.ops import memory_efficient_attention, unbind
+
+        XFORMERS_AVAILABLE = True
+        warnings.warn("xFormers is available (Attention)")
+    else:
+        warnings.warn("xFormers is disabled (Attention)")
+        raise ImportError
+except ImportError:
+    XFORMERS_AVAILABLE = False
+    warnings.warn("xFormers is not available (Attention)")
 
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
@@ -90,14 +106,32 @@ class Attention(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         return x, attn
+    
+class MemEffAttention(Attention):
+    def forward(self, x, attn_bias=None):
+        if not XFORMERS_AVAILABLE:
+            if attn_bias is not None:
+                raise AssertionError("xFormers is required for using nested tensors")
+            return super().forward(x)
 
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+        q, k, v = unbind(qkv, 2)
+
+        attn = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+        x = attn.reshape([B, N, C])
+
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x, attn
 
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
+        self.attn = MemEffAttention( #Attention -> MemEffAttention
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
