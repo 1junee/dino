@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  dino:
+    build: 
+      context: .
+      dockerfile: ./environments/Dockerfile
+    volumes:
+      - ../orion-model-dev-data:/opt/data
+      - ./:/opt/dino
+    runtime: nvidia
+    tty: true
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
