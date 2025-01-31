@@ -21,7 +21,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from utils import trunc_normal_
+from .utils import trunc_normal_
 
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
@@ -91,6 +91,20 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x, attn
 
+    def forward_and_extract_qkv(self, x):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x, attn, q, k, v
+
 
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
@@ -111,6 +125,15 @@ class Block(nn.Module):
         x = x + self.drop_path(y)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
+
+    def forward_and_extract_qkv(self, x, return_attention=False):
+        y, attn, q, k, v = self.attn.forward_and_extract_qkv(self.norm1(x))
+        if return_attention:
+            return attn
+        x = x + self.drop_path(
+            y)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x, q, k, v
 
 
 class PatchEmbed(nn.Module):
@@ -212,6 +235,25 @@ class VisionTransformer(nn.Module):
             x = blk(x)
         x = self.norm(x)
         return x[:, 0]
+
+    def get_last_block(self, x):
+        x = self.prepare_tokens(x)
+        for blk in self.blocks:
+            x = blk(x)
+        x = self.norm(x)
+        return x[0]
+
+    def get_qkv_per_layer(self, x, layer_num=11):
+        x = self.prepare_tokens(x)
+        for blk_ind, blk in enumerate(self.blocks):
+            x, q, k, v = blk.forward_and_extract_qkv(x)
+            if blk_ind == layer_num:
+                return (q[0].permute(1,2,0).flatten(start_dim=-2, end_dim=-1)[1:, :],
+                        k[0].permute(1,2,0).flatten(start_dim=-2, end_dim=-1)[1:, :],
+                        v[0].permute(1,2,0).flatten(start_dim=-2, end_dim=-1)[1:, :])
+        return (q[0].permute(1,2,0).flatten(start_dim=-2, end_dim=-1)[1:, :],
+                        k[0].permute(1,2,0).flatten(start_dim=-2, end_dim=-1)[1:, :],
+                        v[0].permute(1,2,0).flatten(start_dim=-2, end_dim=-1)[1:, :])
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)
