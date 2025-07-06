@@ -196,13 +196,15 @@ if __name__ == '__main__':
 
 
     attentions = model.get_last_selfattention(img.to(device))
-
+    # import pdb; pdb.set_trace()
 
     nh = attentions.shape[1] # number of head
-    # import pdb; pdb.set_trace()
+
 
     # we keep only the output patch attention
     attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
+    # import pdb; pdb.set_trace()
+
 
     if args.threshold is not None:
         # we keep only a certain percentage of the mass
@@ -242,6 +244,7 @@ if __name__ == '__main__':
         print(f"{fname} saved.")
 
     if args.threshold is not None:
-        image = skimage.io.imread(os.path.join(out_subdir, "img.png"))
+        image = skimage.io.imread(os.path.join(out_subdir, f"{img_basename}_resized.png"))
         for j in range(nh):
-            display_instances(image, th_attn[j], fname=os.path.join(out_subdir, "mask_th" + str(args.threshold) + "_head" + str(j) +".png"), blur=False)
+            mask_fname = os.path.join(out_subdir, f"{img_basename}_mask_th{args.threshold}_head{j}.png")
+            display_instances(image, th_attn[j], fname=mask_fname, blur=False)

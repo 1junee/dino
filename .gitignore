@@ -1,0 +1,57 @@
+# 이미지 파일
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.tiff
+*.webp
+*.svg
+
+# 파생 mask, attention, 시각화 결과 등 (폴더 내 이미지)
+**/*.jpg
+**/*.jpeg
+**/*.png
+**/*.bmp
+**/*.gif
+**/*.tiff
+**/*.webp
+**/*.svg
+
+# 캐시 파일
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.ipynb_checkpoints/
+.cache/
+.cache
+*.cache
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# 파이썬/IDE/시스템 관련
+.env
+.venv
+env/
+venv/
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# OS별 임시파일
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 기타 대용량 결과 폴더
+output/
+outputs/
+results/
+runs/
+checkpoints/
+weights/
+logs/
