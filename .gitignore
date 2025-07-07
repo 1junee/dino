@@ -7,6 +7,7 @@
 *.tiff
 *.webp
 *.svg
+*.mp4
 
 # 파생 mask, attention, 시각화 결과 등 (폴더 내 이미지)
 **/*.jpg

@@ -95,26 +95,30 @@ def display_instances(image, mask, fname="test", figsize=(5, 5), blur=False, con
     return
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser('Visualize Self-Attention maps')
-    parser.add_argument('--arch', default='vit_small', type=str,
-        choices=['vit_tiny', 'vit_small', 'vit_base'], help='Architecture (support only ViT atm).')
-    parser.add_argument('--patch_size', default=8, type=int, help='Patch resolution of the model.')
-    parser.add_argument('--pretrained_weights', default='', type=str,
-        help="Path to pretrained weights to load.")
-    parser.add_argument("--checkpoint_key", default="teacher", type=str,
-        help='Key to use in the checkpoint (example: "teacher")')
-    parser.add_argument("--image_path", default=None, type=str, help="Path of the image to load.")
-    parser.add_argument("--image_size", default=(480, 480), type=int, nargs="+", help="Resize image.")
-    parser.add_argument('--output_dir', default='/home/work/wonjun/dino/attention_map', help='Path where to save visualizations.')
-    parser.add_argument("--threshold", type=float, default=None, help="""We visualize masks
-        obtained by thresholding the self-attention maps to keep xx% of the mass.""")
-    args = parser.parse_args()
+
+def extract_frames(video_path):
+    """
+    영상 파일에서 프레임들을 추출하여 리스트로 반환.
+    반환: frames(리스트), fps(실수), width(정수), height(정수)
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print('Cannot open video file')
+        
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    cap.release()
+    return frames, fps, width, height
 
 
-
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    # build model
+def visualize_attention(frames, args):
     model = vits.__dict__[args.arch](patch_size=args.patch_size, num_classes=0)
     for p in model.parameters():
         p.requires_grad = False
@@ -153,98 +157,93 @@ if __name__ == '__main__':
             print("There is no reference weights available for this model => We use random weights.")
 
 
-
-    # open image
-    if args.image_path is None:
-        # user has not specified any image - we use our own image
-        print("Please use the `--image_path` argument to indicate the path of the image you wish to visualize.")
-        print("Since no image path have been provided, we take the first image in our paper.")
-        response = requests.get("https://dl.fbaipublicfiles.com/dino/img.png")
-        img = Image.open(BytesIO(response.content))
-        img = img.convert('RGB')
-
-
-    elif os.path.isfile(args.image_path):
-        with open(args.image_path, 'rb') as f:
-            img = Image.open(f)
-            img = img.convert('RGB')
-        import pdb; pdb.set_trace()
-
-    else:
-        print(f"Provided image path {args.image_path} is non valid.")
-        sys.exit(1)
-
-
-
     transform = pth_transforms.Compose([
         pth_transforms.Resize(args.image_size),
         pth_transforms.ToTensor(),
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    img = transform(img)
 
 
-    # make the image divisible by the patch size
-    w, h = img.shape[1] - img.shape[1] % args.patch_size, img.shape[2] - img.shape[2] % args.patch_size
-    img = img[:, :w, :h].unsqueeze(0)
-    import pdb; pdb.set_trace()
-
-    w_featmap = img.shape[-2] // args.patch_size
-    h_featmap = img.shape[-1] // args.patch_size
-
-
-    attentions = model.get_last_selfattention(img.to(device))
-    import pdb; pdb.set_trace()
-
-    nh = attentions.shape[1] # number of head
-
-
-    # we keep only the output patch attention
-    attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
-    # import pdb; pdb.set_trace()
-
-
-    if args.threshold is not None:
-        # we keep only a certain percentage of the mass
-        val, idx = torch.sort(attentions)
-        val /= torch.sum(val, dim=1, keepdim=True)
-        cumval = torch.cumsum(val, dim=1)
-        th_attn = cumval > (1 - args.threshold)
-        idx2 = torch.argsort(idx)
-        for head in range(nh):
-            th_attn[head] = th_attn[head][idx2[head]]
-        th_attn = th_attn.reshape(nh, w_featmap, h_featmap).float()
-        # interpolate
-        th_attn = nn.functional.interpolate(th_attn.unsqueeze(0), scale_factor=args.patch_size, mode="nearest")[0].cpu().numpy()
+    attn_frames = []
+    for idx, frame in enumerate(frames):
+        img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img = transform(img_pil)
+        w, h = img.shape[1] - img.shape[1] % args.patch_size, img.shape[2] - img.shape[2] % args.patch_size
+        img = img[:, :w, :h].unsqueeze(0)
+        w_featmap = img.shape[-2] // args.patch_size
+        h_featmap = img.shape[-1] // args.patch_size
+        with torch.no_grad():
+            attentions = model.get_last_selfattention(img.to(device))
+        # 마지막 레이어 마지막 헤드의 attention
+        last_layer_attention = attentions[0, -1, 0, 1:].reshape(w_featmap, h_featmap).cpu().numpy()
+        last_layer_attention = (last_layer_attention - last_layer_attention.min()) / (last_layer_attention.ptp() + 1e-6)
+        last_layer_attention = cv2.resize(last_layer_attention, tuple(args.image_size), interpolation=cv2.INTER_NEAREST)
+        last_layer_attention = (last_layer_attention * 255).astype(np.uint8)
+        color_attn = cv2.applyColorMap(last_layer_attention, cv2.COLORMAP_JET)
+        attn_frames.append(color_attn)
 
 
+        del attentions, img, img_pil, last_layer_attention, color_attn
+        torch.cuda.empty_cache()
 
-    attentions = attentions.reshape(nh, w_featmap, h_featmap)
-    attentions = nn.functional.interpolate(attentions.unsqueeze(0), scale_factor=args.patch_size, mode="nearest")[0].cpu().numpy()
+        # 진행상황 프린트 (대용량 비디오 처리시)
+        if (idx+1) % 50 == 0:
+            print(f"Processed {idx+1} / {len(frames)} frames...")
+
+    return attn_frames
 
 
-    # save attentions heatmaps
+def save_video(frames, out_path, fps, size):
+    """
+    프레임 리스트(frames)를 비디오 파일로 저장.
+    """
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(out_path, fourcc, fps, size)
+    for frame in frames:
+        writer.write(frame)
+    writer.release()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('Visualize Self-Attention maps')
+    parser.add_argument('--arch', default='vit_small', type=str,
+        choices=['vit_tiny', 'vit_small', 'vit_base'], help='Architecture (support only ViT atm).')
+    parser.add_argument('--patch_size', default=8, type=int, help='Patch resolution of the model.')
+    parser.add_argument('--pretrained_weights', default='', type=str,
+        help="Path to pretrained weights to load.")
+    parser.add_argument("--checkpoint_key", default="teacher", type=str,
+        help='Key to use in the checkpoint (example: "teacher")')
+    parser.add_argument("--video_path",  default='/home/work/wonjun/dino/input.mp4', type=str, help="Path of the input video file.")
+    parser.add_argument("--image_size", default=(720, 1280), type=int, nargs="+", help="Resize image.")
+    parser.add_argument('--output_dir', default='/home/work/wonjun/dino/attention_map', help='Path where to save visualizations.')
+    parser.add_argument("--threshold", type=float, default=None, help="""We visualize masks
+        obtained by thresholding the self-attention maps to keep xx% of the mass.""")
+    args = parser.parse_args()
+
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+
+    # 입력 비디오 → 프레임 리스트
+    frames, fps, width, height = extract_frames(args.video_path)
+    # Attention map 프레임 생성
+    attn_frames = visualize_attention(frames, args)
+    # 비디오로 저장
     os.makedirs(args.output_dir, exist_ok=True)
+    output_video_path = os.path.join(args.output_dir, 'output.mp4')
+    save_video(attn_frames, output_video_path, fps, tuple(args.image_size))
+    print(f"Attention map video saved to {output_video_path}")
 
-    # 이미지 경로에서 확장자 없는 파일명 얻기
-    img_basename = os.path.splitext(os.path.basename(args.image_path if args.image_path else "img.png"))[0]
 
-    # output_dir/img_basename 디렉토리 생성
-    out_subdir = os.path.join(args.output_dir, img_basename)
-    os.makedirs(out_subdir, exist_ok=True)
 
-    resize_img_name = img_basename + "_resized.png"
-    resize_img_path = os.path.join(out_subdir, resize_img_name)
 
-    torchvision.utils.save_image(torchvision.utils.make_grid(img, normalize=True, scale_each=True), resize_img_path)
-    
-    for j in range(nh):
-        fname = os.path.join(out_subdir, f"{img_basename}_attn-head{j}.png")   
-        plt.imsave(fname=fname, arr=attentions[j], format='png')
-        print(f"{fname} saved.")
 
-    if args.threshold is not None:
-        image = skimage.io.imread(os.path.join(out_subdir, f"{img_basename}_resized.png"))
-        for j in range(nh):
-            mask_fname = os.path.join(out_subdir, f"{img_basename}_mask_th{args.threshold}_head{j}.png")
-            display_instances(image, th_attn[j], fname=mask_fname, blur=False)
+   
+
+
+
+
+
+
+
+
