@@ -168,7 +168,7 @@ if __name__ == '__main__':
         with open(args.image_path, 'rb') as f:
             img = Image.open(f)
             img = img.convert('RGB')
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
     else:
         print(f"Provided image path {args.image_path} is non valid.")
@@ -187,20 +187,24 @@ if __name__ == '__main__':
     # make the image divisible by the patch size
     w, h = img.shape[1] - img.shape[1] % args.patch_size, img.shape[2] - img.shape[2] % args.patch_size
     img = img[:, :w, :h].unsqueeze(0)
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
 
     w_featmap = img.shape[-2] // args.patch_size
     h_featmap = img.shape[-1] // args.patch_size
 
 
     attentions = model.get_last_selfattention(img.to(device))
-    import pdb; pdb.set_trace()
+    # attentions = model.get_selfattention(img.to(device), 1)
+
+    # import pdb; pdb.set_trace()
 
     nh = attentions.shape[1] # number of head
 
 
     # we keep only the output patch attention
     attentions = attentions[0, :, 0, 1:].reshape(nh, -1)
+    # attentions = attentions[0, :, 1:, 1:].reshape(nh, -1)
+
     # import pdb; pdb.set_trace()
 
 
@@ -219,32 +223,78 @@ if __name__ == '__main__':
 
 
 
-    attentions = attentions.reshape(nh, w_featmap, h_featmap)
+    attentions = attentions.reshape(nh, h_featmap, w_featmap)
+
+
     attentions = nn.functional.interpolate(attentions.unsqueeze(0), scale_factor=args.patch_size, mode="nearest")[0].cpu().numpy()
+
+
+    # # save attentions heatmaps
+    # os.makedirs(args.output_dir, exist_ok=True)
+
+    # # 이미지 경로에서 확장자 없는 파일명 얻기
+    # img_basename = os.path.splitext(os.path.basename(args.image_path if args.image_path else "img.png"))[0]
+
+    # # output_dir/img_basename 디렉토리 생성
+    # out_subdir = os.path.join(args.output_dir, img_basename)
+    # os.makedirs(out_subdir, exist_ok=True)
+
+    # resize_img_name = img_basename + "_resized.png"
+    # resize_img_path = os.path.join(out_subdir, resize_img_name)
+
+    # torchvision.utils.save_image(torchvision.utils.make_grid(img, normalize=True, scale_each=True), resize_img_path)
+    
+    # for j in range(nh):
+    #     fname = os.path.join(out_subdir, f"{img_basename}_attn-head{j}.png")   
+    #     plt.imsave(fname=fname, arr=attentions[j], format='png')
+    #     print(f"{fname} saved.")
+
+    # if args.threshold is not None:
+    #     image = skimage.io.imread(os.path.join(out_subdir, f"{img_basename}_resized.png"))
+    #     for j in range(nh):
+    #         mask_fname = os.path.join(out_subdir, f"{img_basename}_mask_th{args.threshold}_head{j}.png")
+    #         display_instances(image, th_attn[j], fname=mask_fname, blur=False)
+
 
 
     # save attentions heatmaps
     os.makedirs(args.output_dir, exist_ok=True)
 
     # 이미지 경로에서 확장자 없는 파일명 얻기
-    img_basename = os.path.splitext(os.path.basename(args.image_path if args.image_path else "img.png"))[0]
+    img_basename = os.path.splitext(
+        os.path.basename(args.image_path if args.image_path else "img.png")
+    )[0]
 
-    # output_dir/img_basename 디렉토리 생성
-    out_subdir = os.path.join(args.output_dir, img_basename)
+    # 모델명·패치사이즈 태그 생성
+    model_tag = f"{args.arch}_patch{args.patch_size}"
+
+    # output_dir/img_basename_modelTag 디렉토리 생성
+    out_subdir = os.path.join(args.output_dir, f"{img_basename}_{model_tag}")
     os.makedirs(out_subdir, exist_ok=True)
 
-    resize_img_name = img_basename + "_resized.png"
+    # 리사이즈된 이미지 저장
+    resize_img_name = f"{img_basename}_{model_tag}_resized.png"
     resize_img_path = os.path.join(out_subdir, resize_img_name)
+    torchvision.utils.save_image(
+        torchvision.utils.make_grid(img, normalize=True, scale_each=True),
+        resize_img_path
+    )
 
-    torchvision.utils.save_image(torchvision.utils.make_grid(img, normalize=True, scale_each=True), resize_img_path)
-    
+    # Attention heatmap 저장
     for j in range(nh):
-        fname = os.path.join(out_subdir, f"{img_basename}_attn-head{j}.png")   
+        fname = os.path.join(
+            out_subdir,
+            f"{img_basename}_{model_tag}_attn-head{j}.png"
+        )
         plt.imsave(fname=fname, arr=attentions[j], format='png')
         print(f"{fname} saved.")
 
+    # Threshold 마스크 저장
     if args.threshold is not None:
-        image = skimage.io.imread(os.path.join(out_subdir, f"{img_basename}_resized.png"))
+        image = skimage.io.imread(resize_img_path)
         for j in range(nh):
-            mask_fname = os.path.join(out_subdir, f"{img_basename}_mask_th{args.threshold}_head{j}.png")
+            mask_fname = os.path.join(
+                out_subdir,
+                f"{img_basename}_{model_tag}_mask-th{args.threshold}_head{j}.png"
+            )
             display_instances(image, th_attn[j], fname=mask_fname, blur=False)

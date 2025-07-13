@@ -221,6 +221,17 @@ class VisionTransformer(nn.Module):
             else:
                 # return attention of the last block
                 return blk(x, return_attention=True)
+            
+            
+    def get_selfattention(self, x, layer_num):
+        x = self.prepare_tokens(x)
+        for i, blk in enumerate(self.blocks):
+            if i < layer_num - 1:
+                x = blk(x)
+            else:
+                # return attention of the layer_num block
+                return blk(x, return_attention=True)
+            
 
     def get_intermediate_layers(self, x, n=1):
         x = self.prepare_tokens(x)
