@@ -222,16 +222,39 @@ class VisionTransformer(nn.Module):
                 # return attention of the last block
                 return blk(x, return_attention=True)
             
+    # #block index가 1부터 시작할 때
+    # def get_selfattention(self, x, layer_num):
+    #     x = self.prepare_tokens(x)
+    #     for i, blk in enumerate(self.blocks):
+    #         if i < layer_num - 1:
+    #             x = blk(x)
+    #         else:
+    #             # return attention of the layer_num block
+    #             return blk(x, return_attention=True)
             
     def get_selfattention(self, x, layer_num):
+        """특정 레이어의 self-attention map을 반환합니다.
+
+        Args:
+            x: 입력 텐서
+            layer_num: attention map을 얻고자 하는 레이어 인덱스 (0-based)
+        Returns:
+            torch.Tensor: attention map. 유효하지 않은 layer_num인 경우 None
+        """
         x = self.prepare_tokens(x)
+        
+        # 0번째 레이어는 바로 처리
+        if layer_num == 0:
+            return self.blocks[0](x, return_attention=True)
+        
+        # 1번째 레이어부터는 이전 레이어들을 순차적으로 처리
         for i, blk in enumerate(self.blocks):
-            if i < layer_num - 1:
+            if i < layer_num:
                 x = blk(x)
-            else:
-                # return attention of the layer_num block
+            elif i == layer_num:
                 return blk(x, return_attention=True)
-            
+        
+        return None  # layer_num이 유효하지 않은 경우
 
     def get_intermediate_layers(self, x, n=1):
         x = self.prepare_tokens(x)

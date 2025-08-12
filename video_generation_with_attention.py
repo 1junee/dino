@@ -19,6 +19,7 @@ import random
 import colorsys
 import requests
 from io import BytesIO
+from datetime import datetime
 
 import skimage.io
 from skimage.measure import find_contours
@@ -168,7 +169,7 @@ def visualize_attention(frames, args):
     for idx, frame in enumerate(frames):
         img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         img = transform(img_pil)
-        w, h = img.shape[1] - img.shape[1] % args.patch_size, img.shape[2] - img.shape[2] % args.patch_size
+        w, h = img.shape[1] - img.shape[1] % args.patch_size, img.shape[2] - img.shape[2] % args.patch_size  # 패치사이즈의 배수가 되게끔 조정
         img = img[:, :w, :h].unsqueeze(0)
         w_featmap = img.shape[-2] // args.patch_size
         h_featmap = img.shape[-1] // args.patch_size
@@ -176,7 +177,7 @@ def visualize_attention(frames, args):
             attentions = model.get_last_selfattention(img.to(device))
         # 마지막 레이어 마지막 헤드의 attention
         last_layer_attention = attentions[0, -1, 0, 1:].reshape(w_featmap, h_featmap).cpu().numpy()
-        last_layer_attention = (last_layer_attention - last_layer_attention.min()) / (last_layer_attention.ptp() + 1e-6)
+        last_layer_attention = (last_layer_attention - last_layer_attention.min()) / (np.ptp(last_layer_attention) + 1e-6)
         last_layer_attention = cv2.resize(last_layer_attention, tuple(args.image_size), interpolation=cv2.INTER_NEAREST)
         last_layer_attention = (last_layer_attention * 255).astype(np.uint8)
         color_attn = cv2.applyColorMap(last_layer_attention, cv2.COLORMAP_JET)
@@ -213,8 +214,8 @@ if __name__ == '__main__':
         help="Path to pretrained weights to load.")
     parser.add_argument("--checkpoint_key", default="teacher", type=str,
         help='Key to use in the checkpoint (example: "teacher")')
-    parser.add_argument("--video_path",  default='/home/work/wonjun/dino/input.mp4', type=str, help="Path of the input video file.")
-    parser.add_argument("--image_size", default=(720, 1280), type=int, nargs="+", help="Resize image.")
+    parser.add_argument("--video_path",  default='/home/work/wonjun/dino/input2.mp4', type=str, help="Path of the input video file.")
+    parser.add_argument("--image_size", default=None, type=int, nargs=2, help="Resize image (h w).")
     parser.add_argument('--output_dir', default='/home/work/wonjun/dino/attention_map', help='Path where to save visualizations.')
     parser.add_argument("--threshold", type=float, default=None, help="""We visualize masks
         obtained by thresholding the self-attention maps to keep xx% of the mass.""")
@@ -226,24 +227,27 @@ if __name__ == '__main__':
 
     # 입력 비디오 → 프레임 리스트
     frames, fps, width, height = extract_frames(args.video_path)
+
+
+    # 비디오 프레임 크기로 image_size 덮어쓰기
+    if args.image_size is None:
+        # transforms.Resize expects (h, w)
+        args.image_size = (int(height*0.8), int(width*0.8))
+    else:
+        # 사용자가 --image_size 를 지정했으면 (h, w) 형태로 강제 변환
+        args.image_size = tuple(args.image_size)
+
+
     # Attention map 프레임 생성
     attn_frames = visualize_attention(frames, args)
+
+
     # 비디오로 저장
     os.makedirs(args.output_dir, exist_ok=True)
-    output_video_path = os.path.join(args.output_dir, 'output.mp4')
+    now = datetime.now().strftime("%H%M")   # 시분(예: 1423)
+    output_video_path = os.path.join(
+        args.output_dir,
+        f'output_{now}.mp4'
+    )
     save_video(attn_frames, output_video_path, fps, tuple(args.image_size))
     print(f"Attention map video saved to {output_video_path}")
-
-
-
-
-
-   
-
-
-
-
-
-
-
-
